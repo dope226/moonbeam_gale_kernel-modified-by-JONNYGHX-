@@ -772,15 +772,22 @@ static void ssg_finish_request(struct request *rq)
 	struct blk_mq_hw_ctx *hctx;
 
 	if (blk_queue_is_zoned(q)) {
-		unsigned long flags;
+    unsigned long flags;
+    struct blk_mq_hw_ctx;
 
-		spin_lock_irqsave(&ssg->zone_lock, flags);
-		blk_req_zone_write_unlock(rq);
-		if (!list_empty(&ssg->fifo_list[WRITE]))
-			hctx = blk_mq_map_queue(q, rq->mq_ctx->cpu);
-			blk_mq_sched_mark_restart_hctx(hctx);
-		spin_unlock_irqrestore(&ssg->zone_lock, flags);
-	}
+    spin_lock_irqsave(&ssg->zone_lock, flags);
+    blk_req_zone_write_unlock(rq);
+
+    if (!list_empty(&ssg->fifo_list[WRITE])) {
+
+        hctx = blk_mq_map_queue(q, rq->mq_ctx->cpu);
+        
+        if (hctx)
+            blk_mq_sched_mark_restart_hctx(hctx);
+    }
+
+    spin_unlock_irqrestore(&ssg->zone_lock, flags);
+}
 
 	if (unlikely(!(rq->rq_flags & RQF_ELVPRIV)))
 		return;
