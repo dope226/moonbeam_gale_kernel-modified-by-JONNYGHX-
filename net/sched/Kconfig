@@ -398,7 +398,7 @@ config NET_SCH_PLUG
 	  To compile this code as a module, choose M here: the
 	  module will be called sch_plug.
 
-menuconfig NET_SCH_
+menuconfig NET_SCH_DEFAULT
 	bool "Allow override  queue discipline"
 	---help---
 	  Support for selection of  queuing discipline.
@@ -409,7 +409,7 @@ menuconfig NET_SCH_
 
 	  If unsure, say N.
 
-if NET_SCH_
+if NET_SCH_DEFAULT
 
 choice
 	prompt "Default queuing discipline"
