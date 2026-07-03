@@ -51,31 +51,31 @@ jobs:
         working-directory: kernel/source
         run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
 
-      # SOLUTION ABSOLUE : On cherche le ZIP n'importe où dans le repo
+      # SOLUTION 100% ROBUSTE : Recherche depuis la racine absolue du travail
       - name: Intégrer ReSuKiSU depuis le dépôt local
         run: |
-          echo "Recherche du fichier ReSuKiSU-main.zip..."
-          ZIP_PATH=$(find . -name "ReSuKiSU-main.zip" -type f -print -quit)
+          echo "📂 Dossier actuel : $(pwd)"
+          echo "🕵️ Recherche de ReSuKiSU-main.zip dans tout le dépôt..."
+          # On cherche depuis le dossier de travail complet de GitHub
+          ZIP_PATH=$(find "$GITHUB_WORKSPACE" -name "ReSuKiSU-main.zip" -type f -print -quit)
           
           if [ -z "$ZIP_PATH" ]; then
-            echo "❌ ERREUR: Fichier ReSuKiSU-main.zip introuvable dans le dépôt !"
+            echo "❌ ERREUR FATALE: Impossible de trouver ReSuKiSU-main.zip dans le dépôt."
+            echo "Vérifiez qu'il est bien présent à la racine sur GitHub."
             exit 1
           fi
           
-          echo "✅ Fichier trouvé ici : $ZIP_PATH"
-          unzip -q "$ZIP_PATH" -d .
+          echo "✅ ZIP trouvé ici : $ZIP_PATH"
           
-          if [ -d "ReSuKiSU-main" ]; then
-            echo "Déplacement des fichiers vers kernel/source..."
-            mv ReSuKiSU-main kernel/source/ReSuKiSU-main
-            cd kernel/source
-            cp -r ReSuKiSU-main/* .
-            rm -rf ReSuKiSU-main
-            echo "✅ ReSuKiSU intégré avec succès depuis le dépôt local"
-          else
-            echo "❌ ERREUR: Le dossier ReSuKiSU-main n'a pas été créé après décompression."
-            exit 1
-          fi
+          # On décompresse dans un dossier temporaire propre
+          mkdir -p /tmp/resukisu_extract
+          unzip -q "$ZIP_PATH" -d /tmp/resukisu_extract
+          
+          # On déplace et on intègre
+          cd kernel/source
+          cp -r /tmp/resukisu_extract/ReSuKiSU-main/* .
+          rm -rf /tmp/resukisu_extract
+          echo "✅ ReSuKiSU intégré avec succès dans kernel/source !"
 
       - name: Bypass local DTC compilation
         working-directory: kernel/source
