@@ -1,4 +1,4 @@
-name: Build MONSTERKERNEL (moonbeam + MultiSU + ReSuKiSU)
+name: Build MONSTERKERNEL (moonbeam + ReSukiSU)
 on:
   workflow_dispatch:
 
@@ -44,43 +44,10 @@ jobs:
           rm ndk.zip
           NDK_BIN="${GITHUB_WORKSPACE}/toolchain/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           echo "$NDK_BIN" >> $GITHUB_PATH
-          echo "NDK_BIN=$NDK_BIN" >> $GITHUB_ENV
-          echo "CLANG_DRIVER=${NDK_BIN}/aarch64-linux-android${ANDROID_API_LEVEL}-clang" >> $GITHUB_ENV
 
-      - name: Intégrer MultiSU
+      - name: Intégrer ReSukiSU (dernière version)
         working-directory: kernel/source
-        run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
-
-      # SOLUTION RADICALE : Télécharger le ZIP depuis l'URL brute de GitHub
-      - name: Intégrer ReSuKiSU
-        working-directory: kernel/source
-        run: |
-          echo "📂 Téléchargement de ReSuKiSU-main.zip depuis le dépôt distant..."
-          # On télécharge le fichier exactement là où on est (kernel/source) via l'API brute de GitHub
-          wget -q -O ReSuKiSU-main.zip https://github.com/dope226/moonbeam_gale_kernel-modified-by-JONNYGHX-/raw/mb-mglru/ReSuKiSU-main.zip
-          
-          echo "🔄 Décompression locale..."
-          unzip -q ReSuKiSU-main.zip
-          
-          echo "📂 Copie des fichiers à la racine du noyau..."
-          cp -r ReSuKiSU-main/* .
-          
-          echo "🧹 Nettoyage..."
-          rm -rf ReSuKiSU-main.zip ReSuKiSU-main
-          echo "✅ ReSuKiSU intégré avec succès !"
-
-      - name: Bypass local DTC compilation
-        working-directory: kernel/source
-        run: |
-          mkdir -p scripts/dtc
-          touch scripts/dtc/dtc
-          chmod +x scripts/dtc/dtc
-
-      - name: Neutraliser les hooks KPROBES non-GKI
-        working-directory: kernel/source
-        run: |
-          sed -i 's/$(error -- KernelSU-Next: No hooks were defined.*)/# Hooks bypassed/' drivers/kernelsu/Kbuild || true
-          sed -i '142s/ifdef CONFIG_KPROBES/if 0/' drivers/kernelsu/Kbuild || echo "Ligne 142 non modifiée"
+        run: curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
       - name: Activer les flags requis
         working-directory: kernel/source
@@ -89,39 +56,41 @@ jobs:
           sed -i 's/^# CONFIG_KSU is not set/CONFIG_KSU=y/' "$DEFCONFIG" || true
           grep -q '^CONFIG_KSU=y' "$DEFCONFIG" || echo 'CONFIG_KSU=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_KPM=y' "$DEFCONFIG" || echo 'CONFIG_KPM=y' >> "$DEFCONFIG"
+          sed -i 's/^# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' "$DEFCONFIG" || true
+          sed -i 's/^# CONFIG_KALLSYMS_ALL is not set/CONFIG_KALLSYMS_ALL=y/' "$DEFCONFIG" || true
           grep -q '^CONFIG_TCP_CONG_BBR=y' "$DEFCONFIG" || echo 'CONFIG_TCP_CONG_BBR=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_NET_SCH_FQ=y' "$DEFCONFIG" || echo 'CONFIG_NET_SCH_FQ=y' >> "$DEFCONFIG"
+          sed -i '/^CONFIG_DEFAULT_TCP_CONG=/d' "$DEFCONFIG" || true
           echo 'CONFIG_DEFAULT_TCP_CONG="bbr"' >> "$DEFCONFIG"
-          grep -q '^CONFIG_RESUKISU=y' "$DEFCONFIG" || echo 'CONFIG_RESUKISU=y' >> "$DEFCONFIG"
+          sed -i '/^CONFIG_LOCALVERSION=/d' "$DEFCONFIG" || true
+          echo 'CONFIG_LOCALVERSION="-MONSTERKERNEL"' >> "$DEFCONFIG"
 
       - name: Configure environment variables for NDK build
         working-directory: kernel/source
         run: |
-          echo "HOSTCC=gcc" >> $GITHUB_ENV
-          echo "HOSTCXX=g++" >> $GITHUB_ENV
           echo "CC=aarch64-linux-android${ANDROID_API_LEVEL}-clang" >> $GITHUB_ENV
+          echo "CLANG_TRIPLE=aarch64-linux-android-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-android-" >> $GITHUB_ENV
           echo "LD=ld.lld" >> $GITHUB_ENV
+          echo "HOSTCC=gcc" >> $GITHUB_ENV
           echo "LLVM=1" >> $GITHUB_ENV
 
       - name: Compile kernel
         working-directory: kernel/source
         run: |
           set -euo pipefail
-          export ARCH=arm64 SUBARCH=arm64
+          export ARCH=arm64 SUBARCH=arm64 LLVM=1
           make O=out gale_defconfig 2>&1 | tee defconfig.log
-          make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 DTC=dtc CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
+          make O=out CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
           echo "${PIPESTATUS[0]}" > build_rc
 
-      - name: Vérifier Image.gz-dtb
+      - name: Vérifier Image.gz-dtb et activation KSU
         run: |
           if [ ! -f kernel/source/out/arch/arm64/boot/Image.gz-dtb ]; then
             echo "Image.gz-dtb introuvable, build invalide"
             exit 1
           fi
-
-      - name: Vérifier activation ReSuKiSU
-        run: |
-          grep CONFIG_RESUKISU kernel/source/out/.config || echo "CONFIG_RESUKISU absent du .config"
+          grep '^CONFIG_KSU=y' kernel/source/out/.config || echo "ATTENTION: CONFIG_KSU absent du .config final"
 
       - name: Package with real AnyKernel3
         run: |
@@ -141,17 +110,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: |
-            kernel/source/*.log
-            kernel/source/out/*.log
-            kernel/source/build_rc
-
-      - name: Upload out directory
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-out
-          path: kernel/source/out
+          path: kernel/source/*.log
 
       - name: Upload flashable zip
         if: success()
