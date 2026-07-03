@@ -1,4 +1,4 @@
-name: Build MONSTERKERNEL (moonbeam + MultiSU + susfs)
+name: Build MONSTERKERNEL (moonbeam + MultiSU)
 on:
   workflow_dispatch:
 
@@ -51,13 +51,6 @@ jobs:
         working-directory: kernel/source
         run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
 
-      - name: Intégrer susfs (patch 4.19)
-        working-directory: kernel/source
-        run: |
-          git clone --depth=1 https://github.com/xxblebleblexx/susfs_patch ../susfs_patch
-          cp ../susfs_patch/susfix-419.patch .
-          patch -p1 < susfix-419.patch
-
       - name: Neutraliser les hooks KPROBES non-GKI
         working-directory: kernel/source
         run: |
@@ -67,7 +60,6 @@ jobs:
       - name: Corriger KernelSU hook manquant
         working-directory: kernel/source
         run: |
-          # Patch Kbuild pour éviter l'erreur "No hooks were defined"
           sed -i 's/$(error -- KernelSU-Next: No hooks were defined.*)/# Hooks neutralisés, bypass erreur/' drivers/kernelsu/Kbuild
 
       - name: Activer les flags requis
@@ -97,8 +89,14 @@ jobs:
           make O=out gale_defconfig 2>&1 | tee defconfig.log
           ( make O=out CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log ) || echo $? > build_rc
 
+      - name: Vérifier Image.gz-dtb
+        run: |
+          if [ ! -f kernel/source/out/arch/arm64/boot/Image.gz-dtb ]; then
+            echo "Image.gz-dtb introuvable, build invalide"
+            exit 1
+          fi
+
       - name: Package with real AnyKernel3
-        if: success()
         run: |
           cp kernel/source/out/arch/arm64/boot/Image.gz-dtb AK3/Image.gz-dtb
           cd AK3
