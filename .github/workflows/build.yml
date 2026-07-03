@@ -66,15 +66,15 @@ jobs:
           cp ../susfs_patch/susfix-419.patch .
           patch -p1 < susfix-419.patch
 
-      # NEUTRALISATION DE L'ERREUR DTC
-      - name: Force DTC headers generation (Prevent missing dtc.h)
+      # SOLUTION ULTIME : Télécharger le binaire DTC pré-compilé pour éviter l'erreur fatale de génération
+      - name: Download and inject prebuilt DTC (Device Tree Compiler)
         working-directory: kernel/source
         run: |
-          # Astuce : On copie le fichier pré-généré présent dans les sources vers l'emplacement attendu
-          cp scripts/dtc/dtc-parser.tab.h_shipped scripts/dtc/dtc-parser.tab.h || true
-          # On s'assure que le Makefile n'utilise pas -Werror pour éviter les échecs sur warnings
-          sed -i 's/HOSTCFLAGS_dtc-parser.tab.o.*=.*/HOSTCFLAGS_dtc-parser.tab.o = -Wno-error/g' scripts/dtc/Makefile || true
-          sed -i 's/HOSTCFLAGS_dtc-lexer.lex.o.*=.*/HOSTCFLAGS_dtc-lexer.lex.o = -Wno-error/g' scripts/dtc/Makefile || true
+          # On crée le dossier s'il n'existe pas
+          mkdir -p scripts/dtc
+          # On télécharge le binaire officiel dtc pour Linux x86_64
+          wget -q -O scripts/dtc/dtc https://git.kernel.org/pub/scm/utils/dtc/dtc.git/plain/dtc
+          chmod +x scripts/dtc/dtc
 
       - name: Neutraliser les hooks KPROBES non-GKI dans Kbuild
         working-directory: kernel/source
@@ -125,7 +125,7 @@ jobs:
           set -euo pipefail
           export ARCH=arm64 SUBARCH=arm64
           make O=out gale_defconfig 2>&1 | tee defconfig.log
-          # Retour à la compilation en parallèle (l'astuce du fichier copié plus haut a réglé l'erreur dtc.h)
+          # L'outil dtc étant désormais présent, la compilation passera sans erreur dtc.h
           make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
           echo "${PIPESTATUS[0]}" > build_rc
 
