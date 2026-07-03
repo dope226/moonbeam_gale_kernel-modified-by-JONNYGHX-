@@ -66,14 +66,15 @@ jobs:
           cp ../susfs_patch/susfix-419.patch .
           patch -p1 < susfix-419.patch
 
-      - name: Patch DTC Makefile and dependencies
+      # NEUTRALISATION DE L'ERREUR DTC
+      - name: Force DTC headers generation (Prevent missing dtc.h)
         working-directory: kernel/source
         run: |
-          # On ignore les warnings et on force le standard C pour éviter les erreurs de compilation
+          # Astuce : On copie le fichier pré-généré présent dans les sources vers l'emplacement attendu
+          cp scripts/dtc/dtc-parser.tab.h_shipped scripts/dtc/dtc-parser.tab.h || true
+          # On s'assure que le Makefile n'utilise pas -Werror pour éviter les échecs sur warnings
           sed -i 's/HOSTCFLAGS_dtc-parser.tab.o.*=.*/HOSTCFLAGS_dtc-parser.tab.o = -Wno-error/g' scripts/dtc/Makefile || true
           sed -i 's/HOSTCFLAGS_dtc-lexer.lex.o.*=.*/HOSTCFLAGS_dtc-lexer.lex.o = -Wno-error/g' scripts/dtc/Makefile || true
-          echo 'HOSTCFLAGS_dtc-lexer.lex.o += -std=gnu99' >> scripts/dtc/Makefile
-          echo 'HOSTCFLAGS_dtc-parser.tab.o += -std=gnu99' >> scripts/dtc/Makefile
 
       - name: Neutraliser les hooks KPROBES non-GKI dans Kbuild
         working-directory: kernel/source
@@ -118,26 +119,13 @@ jobs:
           echo "LD=ld.lld" >> $GITHUB_ENV
           echo "LLVM=1" >> $GITHUB_ENV
 
-      # ÉTAPE CRUCIALE : On force la création des fichiers avant la compilation pour éviter l'erreur dtc.h
-      - name: Pre-generate DTC headers to avoid build races
-        working-directory: kernel/source
-        run: |
-          mkdir -p out/scripts/dtc
-          echo "Generating dtc-parser.tab.h manually..."
-          bison -d -o out/scripts/dtc/dtc-parser.tab.c scripts/dtc/dtc-parser.y || true
-          # Vérifie si le header a été créé
-          ls -la out/scripts/dtc/ || true
-
       - name: Compile kernel
         working-directory: kernel/source
         run: |
           set -euo pipefail
           export ARCH=arm64 SUBARCH=arm64
           make O=out gale_defconfig 2>&1 | tee defconfig.log
-          # ATTENTION : On compile avec -j1 (mono-thread) pour l'étape scripts/dtc, puis on relance en parallèle.
-          # Cela garantit que dtc-parser.tab.h est bien créé avant dtc-lexer.lex.c
-          make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j1 scripts 2>&1 | tee scripts_build.log
-          # Si les scripts sont compilés, on lance le reste (le kernel) en parallèle
+          # Retour à la compilation en parallèle (l'astuce du fichier copié plus haut a réglé l'erreur dtc.h)
           make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
           echo "${PIPESTATUS[0]}" > build_rc
 
