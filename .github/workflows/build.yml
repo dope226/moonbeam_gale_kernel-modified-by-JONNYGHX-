@@ -88,10 +88,11 @@ jobs:
         working-directory: kernel/source
         run: |
           set -euo pipefail
-          make O=out gale_defconfig
-          make O=out CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc)
+          make O=out gale_defconfig 2>&1 | tee defconfig.log
+          ( make O=out CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log ) || echo $? > build_rc
 
       - name: Package with real AnyKernel3
+        if: success()
         run: |
           cp kernel/source/out/arch/arm64/boot/Image.gz-dtb AK3/Image.gz-dtb
           cd AK3
@@ -109,7 +110,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: kernel/source/out/*.log
+          path: |
+            kernel/source/*.log
+            kernel/source/out/*.log
+            kernel/source/build_rc
 
       - name: Upload flashable zip
         if: always()
