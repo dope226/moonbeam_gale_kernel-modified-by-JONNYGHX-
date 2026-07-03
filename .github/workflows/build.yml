@@ -66,13 +66,15 @@ jobs:
           cp ../susfs_patch/susfix-419.patch .
           patch -p1 < susfix-419.patch
 
-      # SOLUTION INFAILLIBLE : Tromper le Makefile et utiliser l'outil système
-      - name: Bypass local DTC compilation and use system DTC
+      # SOLUTION ABSOLUE : Supprimer les sources pour forcer l'utilisation du dtc système
+      - name: Delete DTC sources to force use of system DTC
         working-directory: kernel/source
         run: |
-          # 1. On crée le dossier
-          mkdir -p scripts/dtc
-          # 2. On crée un faux binaire vide pour que make pense que dtc existe déjà
+          # On supprime les fichiers qui causent les erreurs de compilation sous Ubuntu 22.04
+          rm -f scripts/dtc/dtc-lexer.l
+          rm -f scripts/dtc/dtc-parser.y
+          rm -f scripts/dtc/dtc.c
+          # On crée quand même un fichier dtc vide pour que le Makefile le trouve et saute l'étape HOSTLD
           touch scripts/dtc/dtc
           chmod +x scripts/dtc/dtc
 
@@ -125,7 +127,7 @@ jobs:
           set -euo pipefail
           export ARCH=arm64 SUBARCH=arm64
           make O=out gale_defconfig 2>&1 | tee defconfig.log
-          # On force l'utilisation du DTC système et on lance en parallèle
+          # DTC=dtc force l'utilisation du binaire système, les fichiers sources ayant été supprimés plus haut.
           make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 DTC=dtc CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
           echo "${PIPESTATUS[0]}" > build_rc
 
