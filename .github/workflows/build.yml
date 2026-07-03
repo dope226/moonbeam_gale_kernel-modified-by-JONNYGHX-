@@ -65,6 +65,14 @@ jobs:
           cp ../susfs_patch/susfix-419.patch .
           patch -p1 < susfix-419.patch
 
+      - name: Neutraliser les hooks KPROBES non-GKI
+        working-directory: kernel/source
+        run: |
+          echo "--- Contenu de drivers/kernelsu/Kbuild autour de la ligne 142 ---"
+          sed -n '120,160p' drivers/kernelsu/Kbuild || echo "Kbuild introuvable à ce chemin"
+          find drivers/kernelsu -type f \( -name "*.c" -o -name "Kbuild" -o -name "Makefile" \) \
+            -exec sed -i 's/#ifdef CONFIG_KPROBES/#if defined(CONFIG_KPROBES) \&\& 0/g' {} +
+
       - name: Activer les flags requis
         working-directory: kernel/source
         run: |
