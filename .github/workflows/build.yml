@@ -36,7 +36,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libelf-dev dwarves zip unzip \
             git wget ca-certificates gnupg curl unzip \
-            libyaml-dev libtool autoconf
+            libyaml-dev libtool autoconf device-tree-compiler
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu || true
 
       - name: Download and extract Android NDK
@@ -66,14 +66,14 @@ jobs:
           cp ../susfs_patch/susfix-419.patch .
           patch -p1 < susfix-419.patch
 
-      # SOLUTION ULTIME : Télécharger le binaire DTC pré-compilé pour éviter l'erreur fatale de génération
-      - name: Download and inject prebuilt DTC (Device Tree Compiler)
+      # SOLUTION INFAILLIBLE : Tromper le Makefile et utiliser l'outil système
+      - name: Bypass local DTC compilation and use system DTC
         working-directory: kernel/source
         run: |
-          # On crée le dossier s'il n'existe pas
+          # 1. On crée le dossier
           mkdir -p scripts/dtc
-          # On télécharge le binaire officiel dtc pour Linux x86_64
-          wget -q -O scripts/dtc/dtc https://git.kernel.org/pub/scm/utils/dtc/dtc.git/plain/dtc
+          # 2. On crée un faux binaire vide pour que make pense que dtc existe déjà
+          touch scripts/dtc/dtc
           chmod +x scripts/dtc/dtc
 
       - name: Neutraliser les hooks KPROBES non-GKI dans Kbuild
@@ -125,8 +125,8 @@ jobs:
           set -euo pipefail
           export ARCH=arm64 SUBARCH=arm64
           make O=out gale_defconfig 2>&1 | tee defconfig.log
-          # L'outil dtc étant désormais présent, la compilation passera sans erreur dtc.h
-          make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
+          # On force l'utilisation du DTC système et on lance en parallèle
+          make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 DTC=dtc CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
           echo "${PIPESTATUS[0]}" > build_rc
 
       - name: Package with real AnyKernel3
