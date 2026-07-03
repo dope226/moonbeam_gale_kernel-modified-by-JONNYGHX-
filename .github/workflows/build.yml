@@ -66,23 +66,24 @@ jobs:
           cp ../susfs_patch/susfix-419.patch .
           patch -p1 < susfix-419.patch
 
-      # SOLUTION ABSOLUE : Supprimer les sources pour forcer l'utilisation du dtc système
+      # SOLUTION AU PROBLÈME DES HOOKS : Appel du script d'intégration de KernelSU
+      - name: Intégrer KernelSU-Next Hooks
+        working-directory: kernel/source
+        run: |
+          # Clone le dépôt de KernelSU-Next
+          git clone --depth=1 https://github.com/5ec1cff/KernelSU-Next ../KernelSU-Next
+          # Exécute le script d'intégration des hooks pour noyau 4.19
+          bash ../KernelSU-Next/kernel/setup.sh
+
+      # SOLUTION ABSOLUE AUX PROBLÈMES DTC
       - name: Delete DTC sources to force use of system DTC
         working-directory: kernel/source
         run: |
-          # On supprime les fichiers qui causent les erreurs de compilation sous Ubuntu 22.04
           rm -f scripts/dtc/dtc-lexer.l
           rm -f scripts/dtc/dtc-parser.y
           rm -f scripts/dtc/dtc.c
-          # On crée quand même un fichier dtc vide pour que le Makefile le trouve et saute l'étape HOSTLD
           touch scripts/dtc/dtc
           chmod +x scripts/dtc/dtc
-
-      - name: Neutraliser les hooks KPROBES non-GKI dans Kbuild
-        working-directory: kernel/source
-        run: |
-          echo "--- Correction du fichier drivers/kernelsu/Kbuild à la ligne 142 ---"
-          sed -i '142s/ifdef CONFIG_KPROBES/if 0/' drivers/kernelsu/Kbuild || echo "Ligne 142 non trouvée"
 
       - name: Activer les flags requis
         working-directory: kernel/source
@@ -127,7 +128,6 @@ jobs:
           set -euo pipefail
           export ARCH=arm64 SUBARCH=arm64
           make O=out gale_defconfig 2>&1 | tee defconfig.log
-          # DTC=dtc force l'utilisation du binaire système, les fichiers sources ayant été supprimés plus haut.
           make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 DTC=dtc CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
           echo "${PIPESTATUS[0]}" > build_rc
 
