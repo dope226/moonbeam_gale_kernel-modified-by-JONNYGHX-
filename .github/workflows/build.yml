@@ -55,27 +55,25 @@ jobs:
           CLANG_DRIVER="${NDK_BIN}/aarch64-linux-android${ANDROID_API_LEVEL}-clang"
           [ -x "$CLANG_DRIVER" ] && sudo ln -sf "$CLANG_DRIVER" /usr/local/bin/aarch64-linux-android${ANDROID_API_LEVEL}-clang || true
 
-      - name: Intégrer MultiSU
-        working-directory: kernel/source
-        run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
+      # NOTE : MultiSU et susfs sont temporairement commentés pour tester la compilation du noyau brut
+      # - name: Intégrer MultiSU
+      #   working-directory: kernel/source
+      #   run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
 
-      - name: Intégrer susfs (patch 4.19)
-        working-directory: kernel/source
-        run: |
-          git clone --depth=1 https://github.com/xxblebleblexx/susfs_patch ../susfs_patch
-          cp ../susfs_patch/susfix-419.patch .
-          patch -p1 < susfix-419.patch
+      # - name: Intégrer susfs (patch 4.19)
+      #   working-directory: kernel/source
+      #   run: |
+      #     git clone --depth=1 https://github.com/xxblebleblexx/susfs_patch ../susfs_patch
+      #     cp ../susfs_patch/susfix-419.patch .
+      #     patch -p1 < susfix-419.patch
 
-      # SOLUTION AU PROBLÈME DES HOOKS : Appel du script d'intégration de KernelSU
+      # SOLUTION AU PROBLÈME DES HOOKS
       - name: Intégrer KernelSU-Next Hooks
         working-directory: kernel/source
         run: |
-          # Clone le dépôt de KernelSU-Next
           git clone --depth=1 https://github.com/5ec1cff/KernelSU-Next ../KernelSU-Next
-          # Exécute le script d'intégration des hooks pour noyau 4.19
           bash ../KernelSU-Next/kernel/setup.sh
 
-      # SOLUTION ABSOLUE AUX PROBLÈMES DTC
       - name: Delete DTC sources to force use of system DTC
         working-directory: kernel/source
         run: |
@@ -128,7 +126,17 @@ jobs:
           set -euo pipefail
           export ARCH=arm64 SUBARCH=arm64
           make O=out gale_defconfig 2>&1 | tee defconfig.log
+          
+          # IMPORTANT : On redirige l'erreur vers stdout pour être sûr de la voir dans les logs GitHub
           make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 DTC=dtc CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
+          
+          # On vérifie si une erreur fatale est présente dans le log
+          if grep -q "Error 2" build.log; then
+            echo "⚠️ ERREUR DE COMPILATION C DÉTECTÉE !"
+            echo "Voici les 50 dernières lignes du log pour trouver l'erreur exacte :"
+            tail -n 50 build.log
+            exit 1
+          fi
           echo "${PIPESTATUS[0]}" > build_rc
 
       - name: Package with real AnyKernel3
