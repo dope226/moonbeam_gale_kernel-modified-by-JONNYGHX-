@@ -51,7 +51,7 @@ jobs:
         working-directory: kernel/source
         run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
 
-      - name: Intégrer Resukisu
+      - name: Intégrer Resukisu officiel
         working-directory: kernel/source
         run: |
           git clone --depth=1 https://github.com/tiann/Resukisu ../Resukisu
