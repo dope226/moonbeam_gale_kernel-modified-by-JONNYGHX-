@@ -51,15 +51,19 @@ jobs:
         working-directory: kernel/source
         run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
 
-      # NOUVELLE ÉTAPE : Utilisation du ZIP local (plus d'erreur réseau 128 !)
+      # CORRECTION DÉFINITIVE DU CHEMIN : On se place à la racine du dépôt
       - name: Intégrer ReSuKiSU depuis le dépôt local
-        working-directory: kernel/source
         run: |
+          # On est maintenant à la racine du dépôt, là où se trouve votre ZIP
           unzip -q ReSuKiSU-main.zip
+          # On déplace le dossier décompressé à l'intérieur de kernel/source
+          mv ReSuKiSU-main kernel/source/ReSuKiSU-main
+          # On entre dans le dossier source, on copie, et on nettoie
+          cd kernel/source
           cp -r ReSuKiSU-main/* .
-          echo "ReSuKiSU intégré avec succès depuis le fichier local"
+          rm -rf ReSuKiSU-main
+          echo "ReSuKiSU intégré avec succès depuis la racine du dépôt"
 
-      # EMPÊCHE LA COMPILATION DE DTC (Cause des erreurs précédentes)
       - name: Bypass local DTC compilation
         working-directory: kernel/source
         run: |
@@ -67,7 +71,6 @@ jobs:
           touch scripts/dtc/dtc
           chmod +x scripts/dtc/dtc
 
-      # CORRECTION DU HOOK KPROBES
       - name: Neutraliser les hooks KPROBES non-GKI
         working-directory: kernel/source
         run: |
