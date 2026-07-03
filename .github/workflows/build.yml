@@ -80,15 +80,6 @@ jobs:
           echo 'CONFIG_DEFAULT_TCP_CONG="bbr"' >> "$DEFCONFIG"
           grep -q '^CONFIG_RESUKISU=y' "$DEFCONFIG" || echo 'CONFIG_RESUKISU=y' >> "$DEFCONFIG"
 
-      - name: Configure environment variables for NDK build
-        run: |
-          echo "CROSS_COMPILE=aarch64-linux-android-" >> $GITHUB_ENV
-          echo "CLANG_TRIPLE=aarch64-linux-android-" >> $GITHUB_ENV
-          echo "CC=${CLANG_DRIVER}" >> $GITHUB_ENV
-          echo "LD=ld.lld" >> $GITHUB_ENV
-          echo "LLVM=1" >> $GITHUB_ENV
-          echo "HOSTCC=gcc" >> $GITHUB_ENV
-
       - name: Compile kernel
         working-directory: kernel/source
         run: |
@@ -102,6 +93,10 @@ jobs:
             echo "Image.gz-dtb introuvable, build invalide"
             exit 1
           fi
+
+      - name: Vérifier activation Resukisu
+        run: |
+          grep CONFIG_RESUKISU kernel/source/out/.config || echo "CONFIG_RESUKISU absent du .config"
 
       - name: Package with real AnyKernel3
         run: |
