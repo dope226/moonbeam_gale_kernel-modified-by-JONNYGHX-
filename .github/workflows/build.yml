@@ -1,0 +1,139 @@
+name: Build MONSTERKERNEL (moonbeam + MultiSU + susfs)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+    env:
+      ARCH: arm64
+      SUBARCH: arm64
+      NDK_VERSION: android-ndk-r25b
+      NDK_URL: https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+      ANDROID_API_LEVEL: "21"
+
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: dope226/moonbeam_gale_kernel-modified-by-JONNYGHX-
+          ref: mb-mglru
+          path: kernel/source
+
+      - name: Checkout AnyKernel3 template
+        uses: actions/checkout@v4
+        with:
+          repository: osm0sis/AnyKernel3
+          path: AK3
+
+      - name: Install host build dependencies
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev dwarves zip unzip \
+            git wget ca-certificates gnupg curl unzip
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu || true
+
+      - name: Download and extract Android NDK
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -e
+          wget -qO ndk.zip "${NDK_URL}"
+          unzip -q ndk.zip -d toolchain
+          rm ndk.zip
+          NDK_BIN="${GITHUB_WORKSPACE}/toolchain/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "$NDK_BIN" >> $GITHUB_PATH
+          sudo ln -sf "$NDK_BIN/llvm-ar" /usr/local/bin/llvm-ar || true
+          sudo ln -sf "$NDK_BIN/llvm-nm" /usr/local/bin/llvm-nm || true
+          sudo ln -sf "$NDK_BIN/llvm-objdump" /usr/local/bin/llvm-objdump || true
+          sudo ln -sf "$NDK_BIN/llvm-strip" /usr/local/bin/llvm-strip || true
+          CLANG_DRIVER="${NDK_BIN}/aarch64-linux-android${ANDROID_API_LEVEL}-clang"
+          [ -x "$CLANG_DRIVER" ] && sudo ln -sf "$CLANG_DRIVER" /usr/local/bin/aarch64-linux-android${ANDROID_API_LEVEL}-clang || true
+
+      - name: Intégrer MultiSU
+        working-directory: kernel/source
+        run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
+
+      - name: Intégrer susfs (patch 4.19)
+        working-directory: kernel/source
+        run: |
+          git clone --depth=1 https://github.com/xxblebleblexx/susfs_patch ../susfs_patch
+          cp ../susfs_patch/susfix-419.patch .
+          patch -p1 < susfix-419.patch
+
+      - name: Activer les flags requis
+        working-directory: kernel/source
+        run: |
+          set -e
+          DEFCONFIG=arch/arm64/configs/gale_defconfig
+          sed -i 's/^# CONFIG_KSU is not set/CONFIG_KSU=y/' "$DEFCONFIG" || true
+          grep -q '^CONFIG_KSU=y' "$DEFCONFIG" || echo 'CONFIG_KSU=y' >> "$DEFCONFIG"
+          grep -q '^CONFIG_KSU_SUSFS=y' "$DEFCONFIG" || echo 'CONFIG_KSU_SUSFS=y' >> "$DEFCONFIG"
+          grep -q '^CONFIG_KPM=y' "$DEFCONFIG" || echo 'CONFIG_KPM=y' >> "$DEFCONFIG"
+          sed -i 's/^# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' "$DEFCONFIG" || true
+          sed -i 's/^# CONFIG_KALLSYMS_ALL is not set/CONFIG_KALLSYMS_ALL=y/' "$DEFCONFIG" || true
+          sed -i '/^CONFIG_LOCALVERSION=/d' "$DEFCONFIG" || true
+          echo 'CONFIG_LOCALVERSION="-MONSTERKERNEL"' >> "$DEFCONFIG"
+          sed -i '/CONFIG_LOCALVERSION_AUTO/d' "$DEFCONFIG" || true
+          sed -i 's/^CONFIG_MTK_SCHED_TRACERS=y/CONFIG_MTK_SCHED_TRACERS=n/' "$DEFCONFIG" || true
+          sed -i 's/^# CONFIG_RD_LZ4 is not set/CONFIG_RD_LZ4=y/' "$DEFCONFIG" || true
+          sed -i 's/^CONFIG_FAULT_INJECTION=y/CONFIG_FAULT_INJECTION=n/' "$DEFCONFIG" || true
+          sed -i 's/^CONFIG_LLVM_POLLY=y/CONFIG_LLVM_POLLY=n/' "$DEFCONFIG" || true
+          sed -i 's/^CONFIG_RCU_BOOST_DELAY=500/CONFIG_RCU_BOOST_DELAY=20/' "$DEFCONFIG" || true
+          sed -i 's/^CONFIG_HZ=500/CONFIG_HZ=800/' "$DEFCONFIG" || true
+          grep -q '^CONFIG_ZRAM_DEF_COMP_LZ4=y' "$DEFCONFIG" || echo 'CONFIG_ZRAM_DEF_COMP_LZ4=y' >> "$DEFCONFIG"
+          grep -q '^CONFIG_TCP_CONG_BBR=y' "$DEFCONFIG" || echo 'CONFIG_TCP_CONG_BBR=y' >> "$DEFCONFIG"
+          grep -q '^CONFIG_NET_SCH_FQ=y' "$DEFCONFIG" || echo 'CONFIG_NET_SCH_FQ=y' >> "$DEFCONFIG"
+          sed -i '/^CONFIG_DEFAULT_TCP_CONG=/d' "$DEFCONFIG" || true
+          echo 'CONFIG_DEFAULT_TCP_CONG="bbr"' >> "$DEFCONFIG"
+
+      - name: Configure environment variables for NDK build
+        working-directory: kernel/source
+        run: |
+          echo "CROSS_COMPILE=aarch64-linux-android-" >> $GITHUB_ENV
+          echo "CLANG_TRIPLE=aarch64-linux-android-" >> $GITHUB_ENV
+          echo "CC=aarch64-linux-android${ANDROID_API_LEVEL}-clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
+          echo "HOSTCC=gcc" >> $GITHUB_ENV
+          echo "LLVM=1" >> $GITHUB_ENV
+
+      - name: Compile kernel
+        working-directory: kernel/source
+        run: |
+          set -euo pipefail
+          export ARCH=arm64 SUBARCH=arm64 LLVM=1
+          make O=out gale_defconfig 2>&1 | tee defconfig.log
+          make O=out CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
+          echo "${PIPESTATUS[0]}" > build_rc
+
+      - name: Package with real AnyKernel3
+        run: |
+          set -e
+          cp kernel/source/out/arch/arm64/boot/Image.gz-dtb AK3/Image.gz-dtb
+          cd AK3
+          sed -i "s/device\.name1=.*/device.name1=gale/" anykernel.sh
+          sed -i "s/device\.name2=.*/device.name2=gust/" anykernel.sh
+          sed -i "s/BLOCK=[^;]*/BLOCK=\/dev\/block\/by-name\/boot/" anykernel.sh
+          sed -i "s/IS_SLOT_DEVICE=[0-9]/IS_SLOT_DEVICE=1/" anykernel.sh
+          sed -i "s/kernel\.string=.*/kernel.string=MONSTERKERNEL by JONNYGHX/" anykernel.sh
+          rm -rf .git
+          zip -r9 ../MONSTERKERNEL-flashable.zip .
+          cd ..
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: kernel/source/*.log
+
+      - name: Upload flashable zip
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MONSTERKERNEL-flashable
+          path: MONSTERKERNEL-flashable.zip
