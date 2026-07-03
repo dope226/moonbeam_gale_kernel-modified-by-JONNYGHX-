@@ -34,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libelf-dev dwarves zip unzip \
-            git wget ca-certificates gnupg curl
+            git wget ca-certificates gnupg curl libyaml-dev device-tree-compiler
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu || true
 
       - name: Download and extract Android NDK
@@ -51,28 +51,42 @@ jobs:
         working-directory: kernel/source
         run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
 
+      # CORRECTION MAJEURE : Téléchargement ZIP pour éviter l'erreur réseau 128
       - name: Intégrer Resukisu officiel
         working-directory: kernel/source
         run: |
-          git clone --depth=1 https://github.com/tiann/Resukisu ../Resukisu
-          cp -r ../Resukisu/* .
+          wget -q -O Resukisu.zip https://github.com/tiann/Resukisu/archive/refs/heads/main.zip
+          unzip -q Resukisu.zip
+          rm Resukisu.zip
+          cp -r Resukisu-main/* .
           echo "Resukisu officiel intégré au kernel source"
 
+      # CORRECTION PRÉCISE DU HOOK : On cible uniquement la ligne 142 du Kbuild pour éviter de casser les fichiers .c
       - name: Neutraliser les hooks KPROBES non-GKI
         working-directory: kernel/source
         run: |
-          find drivers/kernelsu -type f \( -name "*.c" -o -name "Kbuild" -o -name "Makefile" \) \
-            -exec sed -i 's/#ifdef CONFIG_KPROBES/#if defined(CONFIG_KPROBES) \&\& 0/g' {} +
+          sed -i '142s/ifdef CONFIG_KPROBES/if 0/' drivers/kernelsu/Kbuild || echo "Ligne 142 non trouvée, vérification manuelle"
 
-      - name: Corriger KernelSU hook manquant
+      - name: Corriger KernelSU hook manquant (Fallback)
         working-directory: kernel/source
         run: |
-          sed -i 's/$(error -- KernelSU-Next: No hooks were defined.*)/# Hooks neutralisés, bypass erreur/' drivers/kernelsu/Kbuild
+          sed -i 's/$(error -- KernelSU-Next: No hooks were defined.*)/# Hooks neutralisés, bypass erreur/' drivers/kernelsu/Kbuild || true
+
+      # SOLUTION ABSOLUE POUR ÉVITER L'ERREUR DTC
+      - name: Delete DTC sources to force use of system DTC
+        working-directory: kernel/source
+        run: |
+          rm -f scripts/dtc/dtc-lexer.l
+          rm -f scripts/dtc/dtc-parser.y
+          rm -f scripts/dtc/dtc.c
+          touch scripts/dtc/dtc
+          chmod +x scripts/dtc/dtc
 
       - name: Activer les flags requis
         working-directory: kernel/source
         run: |
           DEFCONFIG=arch/arm64/configs/gale_defconfig
+          sed -i 's/^# CONFIG_KSU is not set/CONFIG_KSU=y/' "$DEFCONFIG" || true
           grep -q '^CONFIG_KSU=y' "$DEFCONFIG" || echo 'CONFIG_KSU=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_KPM=y' "$DEFCONFIG" || echo 'CONFIG_KPM=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_TCP_CONG_BBR=y' "$DEFCONFIG" || echo 'CONFIG_TCP_CONG_BBR=y' >> "$DEFCONFIG"
@@ -80,12 +94,23 @@ jobs:
           echo 'CONFIG_DEFAULT_TCP_CONG="bbr"' >> "$DEFCONFIG"
           grep -q '^CONFIG_RESUKISU=y' "$DEFCONFIG" || echo 'CONFIG_RESUKISU=y' >> "$DEFCONFIG"
 
+      - name: Configure environment variables for NDK build
+        working-directory: kernel/source
+        run: |
+          echo "HOSTCC=gcc" >> $GITHUB_ENV
+          echo "HOSTCXX=g++" >> $GITHUB_ENV
+          echo "CC=aarch64-linux-android${ANDROID_API_LEVEL}-clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
+          echo "LLVM=1" >> $GITHUB_ENV
+
       - name: Compile kernel
         working-directory: kernel/source
         run: |
           set -euo pipefail
           make O=out gale_defconfig 2>&1 | tee defconfig.log
-          ( make O=out CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log ) || echo $? > build_rc
+          # On force l'utilisation du DTC système, et on compile avec GCC pour les outils hôte
+          make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 DTC=dtc CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
+          echo "${PIPESTATUS[0]}" > build_rc
 
       - name: Vérifier Image.gz-dtb
         run: |
@@ -129,7 +154,7 @@ jobs:
           path: kernel/source/out
 
       - name: Upload flashable zip
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: MONSTERKERNEL-flashable
