@@ -35,12 +35,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libelf-dev dwarves zip unzip \
-            git wget ca-certificates gnupg curl unzip \
-            libyaml-dev libtool autoconf device-tree-compiler
+            git wget ca-certificates gnupg curl
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu || true
 
       - name: Download and extract Android NDK
-        working-directory: ${{ github.workspace }}
         run: |
           set -e
           wget -qO ndk.zip "${NDK_URL}"
@@ -48,12 +46,8 @@ jobs:
           rm ndk.zip
           NDK_BIN="${GITHUB_WORKSPACE}/toolchain/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           echo "$NDK_BIN" >> $GITHUB_PATH
-          sudo ln -sf "$NDK_BIN/llvm-ar" /usr/local/bin/llvm-ar || true
-          sudo ln -sf "$NDK_BIN/llvm-nm" /usr/local/bin/llvm-nm || true
-          sudo ln -sf "$NDK_BIN/llvm-objdump" /usr/local/bin/llvm-objdump || true
-          sudo ln -sf "$NDK_BIN/llvm-strip" /usr/local/bin/llvm-strip || true
-          CLANG_DRIVER="${NDK_BIN}/aarch64-linux-android${ANDROID_API_LEVEL}-clang"
-          [ -x "$CLANG_DRIVER" ] && sudo ln -sf "$CLANG_DRIVER" /usr/local/bin/aarch64-linux-android${ANDROID_API_LEVEL}-clang || true
+          echo "NDK_BIN=$NDK_BIN" >> $GITHUB_ENV
+          echo "CLANG_DRIVER=${NDK_BIN}/aarch64-linux-android${ANDROID_API_LEVEL}-clang" >> $GITHUB_ENV
 
       - name: Intégrer MultiSU
         working-directory: kernel/source
@@ -66,61 +60,29 @@ jobs:
           cp ../susfs_patch/susfix-419.patch .
           patch -p1 < susfix-419.patch
 
-      # SOLUTION AU PROBLÈME RÉSEAU : Téléchargement ZIP au lieu de git clone
-      - name: Intégrer KernelSU-Next Hooks
+      - name: Neutraliser les hooks KPROBES non-GKI
         working-directory: kernel/source
         run: |
-          # Télécharge l'archive depuis GitHub
-          wget -q -O KernelSU-Next.zip https://github.com/5ec1cff/KernelSU-Next/archive/refs/heads/main.zip
-          unzip -q KernelSU-Next.zip
-          rm KernelSU-Next.zip
-          # Exécute le script d'intégration
-          bash KernelSU-Next-main/kernel/setup.sh
-
-      # SOLUTION ABSOLUE AUX PROBLÈMES DTC
-      - name: Delete DTC sources to force use of system DTC
-        working-directory: kernel/source
-        run: |
-          rm -f scripts/dtc/dtc-lexer.l
-          rm -f scripts/dtc/dtc-parser.y
-          rm -f scripts/dtc/dtc.c
-          touch scripts/dtc/dtc
-          chmod +x scripts/dtc/dtc
+          find drivers/kernelsu -type f \( -name "*.c" -o -name "Kbuild" -o -name "Makefile" \) \
+            -exec sed -i 's/#ifdef CONFIG_KPROBES/#if defined(CONFIG_KPROBES) \&\& 0/g' {} +
 
       - name: Activer les flags requis
         working-directory: kernel/source
         run: |
-          set -e
           DEFCONFIG=arch/arm64/configs/gale_defconfig
           sed -i 's/^# CONFIG_KSU is not set/CONFIG_KSU=y/' "$DEFCONFIG" || true
           grep -q '^CONFIG_KSU=y' "$DEFCONFIG" || echo 'CONFIG_KSU=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_KSU_SUSFS=y' "$DEFCONFIG" || echo 'CONFIG_KSU_SUSFS=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_KPM=y' "$DEFCONFIG" || echo 'CONFIG_KPM=y' >> "$DEFCONFIG"
-          sed -i 's/^# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' "$DEFCONFIG" || true
-          sed -i 's/^# CONFIG_KALLSYMS_ALL is not set/CONFIG_KALLSYMS_ALL=y/' "$DEFCONFIG" || true
-          sed -i '/^CONFIG_LOCALVERSION=/d' "$DEFCONFIG" || true
-          echo 'CONFIG_LOCALVERSION="-MONSTERKERNEL"' >> "$DEFCONFIG"
-          sed -i '/CONFIG_LOCALVERSION_AUTO/d' "$DEFCONFIG" || true
-          sed -i 's/^CONFIG_MTK_SCHED_TRACERS=y/CONFIG_MTK_SCHED_TRACERS=n/' "$DEFCONFIG" || true
-          sed -i 's/^# CONFIG_RD_LZ4 is not set/CONFIG_RD_LZ4=y/' "$DEFCONFIG" || true
-          sed -i 's/^CONFIG_FAULT_INJECTION=y/CONFIG_FAULT_INJECTION=n/' "$DEFCONFIG" || true
-          sed -i 's/^CONFIG_LLVM_POLLY=y/CONFIG_LLVM_POLLY=n/' "$DEFCONFIG" || true
-          sed -i 's/^CONFIG_RCU_BOOST_DELAY=500/CONFIG_RCU_BOOST_DELAY=20/' "$DEFCONFIG" || true
-          sed -i 's/^CONFIG_HZ=500/CONFIG_HZ=800/' "$DEFCONFIG" || true
-          grep -q '^CONFIG_ZRAM_DEF_COMP_LZ4=y' "$DEFCONFIG" || echo 'CONFIG_ZRAM_DEF_COMP_LZ4=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_TCP_CONG_BBR=y' "$DEFCONFIG" || echo 'CONFIG_TCP_CONG_BBR=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_NET_SCH_FQ=y' "$DEFCONFIG" || echo 'CONFIG_NET_SCH_FQ=y' >> "$DEFCONFIG"
-          sed -i '/^CONFIG_DEFAULT_TCP_CONG=/d' "$DEFCONFIG" || true
           echo 'CONFIG_DEFAULT_TCP_CONG="bbr"' >> "$DEFCONFIG"
 
       - name: Configure environment variables for NDK build
-        working-directory: kernel/source
         run: |
-          echo "HOSTCC=gcc" >> $GITHUB_ENV
-          echo "HOSTCXX=g++" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-linux-android-" >> $GITHUB_ENV
           echo "CLANG_TRIPLE=aarch64-linux-android-" >> $GITHUB_ENV
-          echo "CC=aarch64-linux-android${ANDROID_API_LEVEL}-clang" >> $GITHUB_ENV
+          echo "CC=${CLANG_DRIVER}" >> $GITHUB_ENV
           echo "LD=ld.lld" >> $GITHUB_ENV
           echo "LLVM=1" >> $GITHUB_ENV
 
@@ -128,14 +90,11 @@ jobs:
         working-directory: kernel/source
         run: |
           set -euo pipefail
-          export ARCH=arm64 SUBARCH=arm64
-          make O=out gale_defconfig 2>&1 | tee defconfig.log
-          make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 DTC=dtc CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
-          echo "${PIPESTATUS[0]}" > build_rc
+          make O=out gale_defconfig
+          make O=out CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc)
 
       - name: Package with real AnyKernel3
         run: |
-          set -e
           cp kernel/source/out/arch/arm64/boot/Image.gz-dtb AK3/Image.gz-dtb
           cd AK3
           sed -i "s/device\.name1=.*/device.name1=gale/" anykernel.sh
@@ -152,10 +111,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: kernel/source/*.log
+          path: kernel/source/out/*.log
 
       - name: Upload flashable zip
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: MONSTERKERNEL-flashable
