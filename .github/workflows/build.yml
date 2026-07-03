@@ -33,11 +33,9 @@ jobs:
         run: |
           set -e
           sudo apt-get update
-          # Ajout de libyaml-dev pour corriger l'erreur dtc/yamltree.o, et llvm pour l'hôte
           sudo apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libelf-dev dwarves zip unzip \
-            git wget ca-certificates gnupg curl unzip \
-            libyaml-dev llvm
+            git wget ca-certificates gnupg curl unzip libyaml-dev llvm
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu || true
 
       - name: Download and extract Android NDK
@@ -67,13 +65,13 @@ jobs:
           cp ../susfs_patch/susfix-419.patch .
           patch -p1 < susfix-419.patch
 
-      - name: Neutraliser les hooks KPROBES non-GKI
+      # ÉTAPE CORRIGÉE : On cible explicitement le fichier Kbuild à la ligne 142
+      - name: Neutraliser les hooks KPROBES non-GKI dans Kbuild
         working-directory: kernel/source
         run: |
-          echo "--- Contenu de drivers/kernelsu/Kbuild autour de la ligne 142 ---"
-          sed -n '120,160p' drivers/kernelsu/Kbuild || echo "Kbuild introuvable à ce chemin"
-          find drivers/kernelsu -type f \( -name "*.c" -o -name "Kbuild" -o -name "Makefile" \) \
-            -exec sed -i 's/#ifdef CONFIG_KPROBES/#if defined(CONFIG_KPROBES) \&\& 0/g' {} +
+          echo "--- Correction du fichier drivers/kernelsu/Kbuild à la ligne 142 ---"
+          # On remplace la vérification 'ifdef CONFIG_KPROBES' par un if false pour éviter le crash
+          sed -i '142s/ifdef CONFIG_KPROBES/if 0/' drivers/kernelsu/Kbuild || echo "Ligne 142 non trouvée, vérification manuelle nécessaire"
 
       - name: Activer les flags requis
         working-directory: kernel/source
@@ -108,7 +106,6 @@ jobs:
           echo "CLANG_TRIPLE=aarch64-linux-android-" >> $GITHUB_ENV
           echo "CC=aarch64-linux-android${ANDROID_API_LEVEL}-clang" >> $GITHUB_ENV
           echo "LD=ld.lld" >> $GITHUB_ENV
-          # FORCER GCC POUR L'HÔTE (crucial pour éviter l'erreur DTC)
           echo "HOSTCC=gcc" >> $GITHUB_ENV
           echo "LLVM=1" >> $GITHUB_ENV
 
@@ -117,7 +114,6 @@ jobs:
         run: |
           set -euo pipefail
           export ARCH=arm64 SUBARCH=arm64 LLVM=1
-          # On passe HOSTCC en argument explicite ici aussi pour la sécurité
           make O=out gale_defconfig 2>&1 | tee defconfig.log
           make O=out CC="$CC" LD="$LD" LLVM=1 HOSTCC=gcc CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
           echo "${PIPESTATUS[0]}" > build_rc
