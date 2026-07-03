@@ -51,18 +51,31 @@ jobs:
         working-directory: kernel/source
         run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
 
-      # CORRECTION DÉFINITIVE DU CHEMIN : On se place à la racine du dépôt
+      # SOLUTION ABSOLUE : On cherche le ZIP n'importe où dans le repo
       - name: Intégrer ReSuKiSU depuis le dépôt local
         run: |
-          # On est maintenant à la racine du dépôt, là où se trouve votre ZIP
-          unzip -q ReSuKiSU-main.zip
-          # On déplace le dossier décompressé à l'intérieur de kernel/source
-          mv ReSuKiSU-main kernel/source/ReSuKiSU-main
-          # On entre dans le dossier source, on copie, et on nettoie
-          cd kernel/source
-          cp -r ReSuKiSU-main/* .
-          rm -rf ReSuKiSU-main
-          echo "ReSuKiSU intégré avec succès depuis la racine du dépôt"
+          echo "Recherche du fichier ReSuKiSU-main.zip..."
+          ZIP_PATH=$(find . -name "ReSuKiSU-main.zip" -type f -print -quit)
+          
+          if [ -z "$ZIP_PATH" ]; then
+            echo "❌ ERREUR: Fichier ReSuKiSU-main.zip introuvable dans le dépôt !"
+            exit 1
+          fi
+          
+          echo "✅ Fichier trouvé ici : $ZIP_PATH"
+          unzip -q "$ZIP_PATH" -d .
+          
+          if [ -d "ReSuKiSU-main" ]; then
+            echo "Déplacement des fichiers vers kernel/source..."
+            mv ReSuKiSU-main kernel/source/ReSuKiSU-main
+            cd kernel/source
+            cp -r ReSuKiSU-main/* .
+            rm -rf ReSuKiSU-main
+            echo "✅ ReSuKiSU intégré avec succès depuis le dépôt local"
+          else
+            echo "❌ ERREUR: Le dossier ReSuKiSU-main n'a pas été créé après décompression."
+            exit 1
+          fi
 
       - name: Bypass local DTC compilation
         working-directory: kernel/source
