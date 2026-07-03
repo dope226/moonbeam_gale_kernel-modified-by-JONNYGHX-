@@ -56,7 +56,7 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/tiann/Resukisu ../Resukisu
           cp -r ../Resukisu/* .
-          echo "Resukisu intégré au kernel source"
+          echo "Resukisu officiel intégré au kernel source"
 
       - name: Neutraliser les hooks KPROBES non-GKI
         working-directory: kernel/source
@@ -78,6 +78,7 @@ jobs:
           grep -q '^CONFIG_TCP_CONG_BBR=y' "$DEFCONFIG" || echo 'CONFIG_TCP_CONG_BBR=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_NET_SCH_FQ=y' "$DEFCONFIG" || echo 'CONFIG_NET_SCH_FQ=y' >> "$DEFCONFIG"
           echo 'CONFIG_DEFAULT_TCP_CONG="bbr"' >> "$DEFCONFIG"
+          grep -q '^CONFIG_RESUKISU=y' "$DEFCONFIG" || echo 'CONFIG_RESUKISU=y' >> "$DEFCONFIG"
 
       - name: Configure environment variables for NDK build
         run: |
