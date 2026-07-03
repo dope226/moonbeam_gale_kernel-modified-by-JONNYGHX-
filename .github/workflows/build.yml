@@ -31,7 +31,6 @@ jobs:
 
       - name: Install host build dependencies
         run: |
-          set -e
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libelf-dev dwarves zip unzip \
@@ -40,7 +39,6 @@ jobs:
 
       - name: Download and extract Android NDK
         run: |
-          set -e
           wget -qO ndk.zip "${NDK_URL}"
           unzip -q ndk.zip -d toolchain
           rm ndk.zip
@@ -70,7 +68,6 @@ jobs:
         working-directory: kernel/source
         run: |
           DEFCONFIG=arch/arm64/configs/gale_defconfig
-          sed -i 's/^# CONFIG_KSU is not set/CONFIG_KSU=y/' "$DEFCONFIG" || true
           grep -q '^CONFIG_KSU=y' "$DEFCONFIG" || echo 'CONFIG_KSU=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_KSU_SUSFS=y' "$DEFCONFIG" || echo 'CONFIG_KSU_SUSFS=y' >> "$DEFCONFIG"
           grep -q '^CONFIG_KPM=y' "$DEFCONFIG" || echo 'CONFIG_KPM=y' >> "$DEFCONFIG"
@@ -85,6 +82,7 @@ jobs:
           echo "CC=${CLANG_DRIVER}" >> $GITHUB_ENV
           echo "LD=ld.lld" >> $GITHUB_ENV
           echo "LLVM=1" >> $GITHUB_ENV
+          echo "HOSTCC=gcc" >> $GITHUB_ENV
 
       - name: Compile kernel
         working-directory: kernel/source
