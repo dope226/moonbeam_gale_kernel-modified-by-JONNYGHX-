@@ -115,6 +115,13 @@ jobs:
             kernel/source/out/*.log
             kernel/source/build_rc
 
+      - name: Upload out directory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-out
+          path: kernel/source/out
+
       - name: Upload flashable zip
         if: always()
         uses: actions/upload-artifact@v4
