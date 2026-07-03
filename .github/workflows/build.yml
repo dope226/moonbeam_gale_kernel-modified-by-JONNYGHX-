@@ -66,12 +66,15 @@ jobs:
           cp ../susfs_patch/susfix-419.patch .
           patch -p1 < susfix-419.patch
 
-      # Suppression des warnings fatals sur DTC pour éviter le crash à HOSTLD
-      - name: Patch DTC Makefile to ignore warnings
+      # CORRECTION MAJEURE ICI : Forcer GCC pour le parser et le lexer
+      - name: Patch DTC Makefile to ignore warnings and force GCC
         working-directory: kernel/source
         run: |
           sed -i 's/HOSTCFLAGS_dtc-parser.tab.o.*=.*/HOSTCFLAGS_dtc-parser.tab.o = -Wno-error/g' scripts/dtc/Makefile || true
           sed -i 's/HOSTCFLAGS_dtc-lexer.lex.o.*=.*/HOSTCFLAGS_dtc-lexer.lex.o = -Wno-error/g' scripts/dtc/Makefile || true
+          # TRÈS IMPORTANT : On force ces deux fichiers à être compilés avec gcc au lieu de g++ / clang
+          echo 'HOSTCFLAGS_dtc-lexer.lex.o += -std=gnu99' >> scripts/dtc/Makefile
+          echo 'HOSTCFLAGS_dtc-parser.tab.o += -std=gnu99' >> scripts/dtc/Makefile
 
       - name: Neutraliser les hooks KPROBES non-GKI dans Kbuild
         working-directory: kernel/source
@@ -108,7 +111,6 @@ jobs:
       - name: Configure environment variables for NDK build
         working-directory: kernel/source
         run: |
-          # CRUCIAL: Force l'utilisation de GCC pour compiler les outils hôte (dtc, modpost etc)
           echo "HOSTCC=gcc" >> $GITHUB_ENV
           echo "HOSTCXX=g++" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-linux-android-" >> $GITHUB_ENV
@@ -123,7 +125,6 @@ jobs:
           set -euo pipefail
           export ARCH=arm64 SUBARCH=arm64
           make O=out gale_defconfig 2>&1 | tee defconfig.log
-          # HOSTCC et HOSTCXX sont désormais passés dans l'environnement, mais on les répète au cas où
           make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
           echo "${PIPESTATUS[0]}" > build_rc
 
