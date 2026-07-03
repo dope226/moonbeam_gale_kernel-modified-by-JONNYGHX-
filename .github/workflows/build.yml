@@ -51,22 +51,21 @@ jobs:
         working-directory: kernel/source
         run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
 
-      # CORRECTION FINALE (Aucune erreur possible cette fois) :
+      # SOLUTION RADICALE : Télécharger le ZIP depuis l'URL brute de GitHub
       - name: Intégrer ReSuKiSU
+        working-directory: kernel/source
         run: |
-          echo "📂 On déplace le ZIP depuis le dossier de travail vers kernel/source"
-          cp "${{ github.workspace }}/ReSuKiSU-main.zip" "${{ github.workspace }}/kernel/source/"
+          echo "📂 Téléchargement de ReSuKiSU-main.zip depuis le dépôt distant..."
+          # On télécharge le fichier exactement là où on est (kernel/source) via l'API brute de GitHub
+          wget -q -O ReSuKiSU-main.zip https://github.com/dope226/moonbeam_gale_kernel-modified-by-JONNYGHX-/raw/mb-mglru/ReSuKiSU-main.zip
           
-          echo "📂 On entre dans kernel/source"
-          cd "${{ github.workspace }}/kernel/source"
-          
-          echo "🔄 Décompression locale de ReSuKiSU-main.zip"
+          echo "🔄 Décompression locale..."
           unzip -q ReSuKiSU-main.zip
           
-          echo "📂 Copie des fichiers à la racine du noyau"
+          echo "📂 Copie des fichiers à la racine du noyau..."
           cp -r ReSuKiSU-main/* .
           
-          echo "🧹 Nettoyage des fichiers temporaires"
+          echo "🧹 Nettoyage..."
           rm -rf ReSuKiSU-main.zip ReSuKiSU-main
           echo "✅ ReSuKiSU intégré avec succès !"
 
