@@ -51,30 +51,18 @@ jobs:
         working-directory: kernel/source
         run: curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/MultiSU/legacy/kernel/setup.sh" | bash
 
-      # SOLUTION 100% ROBUSTE : Recherche depuis la racine absolue du travail
+      # SOLUTION ABSOLUE : Utiliser github.workspace. C'est infaillible.
       - name: Intégrer ReSuKiSU depuis le dépôt local
         run: |
-          echo "📂 Dossier actuel : $(pwd)"
-          echo "🕵️ Recherche de ReSuKiSU-main.zip dans tout le dépôt..."
-          # On cherche depuis le dossier de travail complet de GitHub
-          ZIP_PATH=$(find "$GITHUB_WORKSPACE" -name "ReSuKiSU-main.zip" -type f -print -quit)
+          echo "Décompression depuis l'emplacement absolu : ${{ github.workspace }}"
+          # On décompresse directement depuis la racine absolue du dépôt
+          unzip -q "${{ github.workspace }}/ReSuKiSU-main.zip" -d "${{ github.workspace }}/tmp_resukisu"
           
-          if [ -z "$ZIP_PATH" ]; then
-            echo "❌ ERREUR FATALE: Impossible de trouver ReSuKiSU-main.zip dans le dépôt."
-            echo "Vérifiez qu'il est bien présent à la racine sur GitHub."
-            exit 1
-          fi
+          # On déplace dans le dossier source
+          cp -r "${{ github.workspace }}/tmp_resukisu/ReSuKiSU-main/"* "${{ github.workspace }}/kernel/source/"
           
-          echo "✅ ZIP trouvé ici : $ZIP_PATH"
-          
-          # On décompresse dans un dossier temporaire propre
-          mkdir -p /tmp/resukisu_extract
-          unzip -q "$ZIP_PATH" -d /tmp/resukisu_extract
-          
-          # On déplace et on intègre
-          cd kernel/source
-          cp -r /tmp/resukisu_extract/ReSuKiSU-main/* .
-          rm -rf /tmp/resukisu_extract
+          # On nettoie
+          rm -rf "${{ github.workspace }}/tmp_resukisu"
           echo "✅ ReSuKiSU intégré avec succès dans kernel/source !"
 
       - name: Bypass local DTC compilation
