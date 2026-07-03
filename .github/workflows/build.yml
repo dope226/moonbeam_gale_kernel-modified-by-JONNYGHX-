@@ -66,13 +66,12 @@ jobs:
           cp ../susfs_patch/susfix-419.patch .
           patch -p1 < susfix-419.patch
 
-      # CORRECTION MAJEURE ICI : Forcer GCC pour le parser et le lexer
-      - name: Patch DTC Makefile to ignore warnings and force GCC
+      - name: Patch DTC Makefile and dependencies
         working-directory: kernel/source
         run: |
+          # On ignore les warnings et on force le standard C pour éviter les erreurs de compilation
           sed -i 's/HOSTCFLAGS_dtc-parser.tab.o.*=.*/HOSTCFLAGS_dtc-parser.tab.o = -Wno-error/g' scripts/dtc/Makefile || true
           sed -i 's/HOSTCFLAGS_dtc-lexer.lex.o.*=.*/HOSTCFLAGS_dtc-lexer.lex.o = -Wno-error/g' scripts/dtc/Makefile || true
-          # TRÈS IMPORTANT : On force ces deux fichiers à être compilés avec gcc au lieu de g++ / clang
           echo 'HOSTCFLAGS_dtc-lexer.lex.o += -std=gnu99' >> scripts/dtc/Makefile
           echo 'HOSTCFLAGS_dtc-parser.tab.o += -std=gnu99' >> scripts/dtc/Makefile
 
@@ -119,12 +118,26 @@ jobs:
           echo "LD=ld.lld" >> $GITHUB_ENV
           echo "LLVM=1" >> $GITHUB_ENV
 
+      # ÉTAPE CRUCIALE : On force la création des fichiers avant la compilation pour éviter l'erreur dtc.h
+      - name: Pre-generate DTC headers to avoid build races
+        working-directory: kernel/source
+        run: |
+          mkdir -p out/scripts/dtc
+          echo "Generating dtc-parser.tab.h manually..."
+          bison -d -o out/scripts/dtc/dtc-parser.tab.c scripts/dtc/dtc-parser.y || true
+          # Vérifie si le header a été créé
+          ls -la out/scripts/dtc/ || true
+
       - name: Compile kernel
         working-directory: kernel/source
         run: |
           set -euo pipefail
           export ARCH=arm64 SUBARCH=arm64
           make O=out gale_defconfig 2>&1 | tee defconfig.log
+          # ATTENTION : On compile avec -j1 (mono-thread) pour l'étape scripts/dtc, puis on relance en parallèle.
+          # Cela garantit que dtc-parser.tab.h est bien créé avant dtc-lexer.lex.c
+          make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j1 scripts 2>&1 | tee scripts_build.log
+          # Si les scripts sont compilés, on lance le reste (le kernel) en parallèle
           make O=out HOSTCC=gcc HOSTCXX=g++ CC="$CC" LD="$LD" LLVM=1 CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" -j$(nproc) 2>&1 | tee build.log
           echo "${PIPESTATUS[0]}" > build_rc
 
