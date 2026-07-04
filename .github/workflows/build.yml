@@ -57,6 +57,14 @@ jobs:
           DEFCONFIG=arch/arm64/configs/gale_defconfig
           grep -q '^CONFIG_KSU_MANUAL_HOOK=y' "$DEFCONFIG" || echo 'CONFIG_KSU_MANUAL_HOOK=y' >> "$DEFCONFIG"
 
+      - name: Diagnostic fs/exec.c (hook ksu_handle_execveat manquant)
+        working-directory: kernel/source
+        run: |
+          echo "--- Lignes contenant do_execve / do_execveat_common ---"
+          grep -n "do_execve\b\|do_execveat_common" fs/exec.c
+          echo "--- Contexte complet autour de do_execve ---"
+          sed -n '/int do_execve(struct filename/,/^}/p' fs/exec.c | head -40
+
       - name: Activer les flags requis
         working-directory: kernel/source
         run: |
