@@ -49,21 +49,53 @@ jobs:
         working-directory: kernel/source
         run: curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-      - name: Diagnostic hook + activer Manual Hook (compatible non-GKI)
+      - name: Activer Manual Hook (compatible non-GKI)
         working-directory: kernel/source
         run: |
-          echo "--- Logique de sélection du hook, drivers/kernelsu/Kbuild autour de la ligne 170 ---"
-          sed -n '140,180p' drivers/kernelsu/Kbuild || echo "Kbuild introuvable à ce chemin"
           DEFCONFIG=arch/arm64/configs/gale_defconfig
           grep -q '^CONFIG_KSU_MANUAL_HOOK=y' "$DEFCONFIG" || echo 'CONFIG_KSU_MANUAL_HOOK=y' >> "$DEFCONFIG"
 
-      - name: Diagnostic fs/exec.c (hook ksu_handle_execveat manquant)
+      - name: Appliquer le hook ksu_handle_execveat dans fs/exec.c
         working-directory: kernel/source
         run: |
-          echo "--- Lignes contenant do_execve / do_execveat_common ---"
-          grep -n "do_execve\b\|do_execveat_common" fs/exec.c
-          echo "--- Contexte complet autour de do_execve ---"
-          sed -n '/int do_execve(struct filename/,/^}/p' fs/exec.c | head -40
+          python3 - <<'PYEOF'
+          with open('fs/exec.c') as f:
+              content = f.read()
+
+          anchor = 'int do_execve(struct filename *filename,'
+          idx = content.find(anchor)
+          if idx == -1:
+              raise SystemExit("ERREUR: signature do_execve introuvable, patch non appliqué")
+
+          extern_decl = (
+              '#ifdef CONFIG_KSU\n'
+              'extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, '
+              'void *argv, void *envp, int *flags);\n'
+              '#endif\n'
+          )
+          content = content[:idx] + extern_decl + content[idx:]
+
+          idx2 = content.find(anchor)
+          func_end = content.find('\n}', idx2) + 2
+          func_body = content[idx2:func_end]
+          old_call = 'return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);'
+          hook_call = (
+              '#ifdef CONFIG_KSU\n'
+              '\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n'
+              '#endif\n'
+              '\t' + old_call
+          )
+          if old_call not in func_body:
+              raise SystemExit("ERREUR: ligne return introuvable dans do_execve, patch non appliqué")
+          func_body_new = func_body.replace(old_call, hook_call, 1)
+          content = content[:idx2] + func_body_new + content[func_end:]
+
+          with open('fs/exec.c', 'w') as f:
+              f.write(content)
+          print("Patch ksu_handle_execveat appliqué avec succès")
+          PYEOF
+          echo "--- Vérification ---"
+          grep -n "ksu_handle_execveat" fs/exec.c | tee exec_patch_verify.log
 
       - name: Activer les flags requis
         working-directory: kernel/source
