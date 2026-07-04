@@ -55,47 +55,72 @@ jobs:
           DEFCONFIG=arch/arm64/configs/gale_defconfig
           grep -q '^CONFIG_KSU_MANUAL_HOOK=y' "$DEFCONFIG" || echo 'CONFIG_KSU_MANUAL_HOOK=y' >> "$DEFCONFIG"
 
-      - name: Appliquer le hook ksu_handle_execveat dans fs/exec.c
+      - name: Appliquer les hooks ReSukiSU manquants
         working-directory: kernel/source
         run: |
           python3 - <<'PYEOF'
-          with open('fs/exec.c') as f:
-              content = f.read()
+          def insert_hook(filepath, extern_decl, func_anchor, body_anchor, hook_call, label):
+              with open(filepath) as f:
+                  content = f.read()
+              idx = content.find(func_anchor)
+              if idx == -1:
+                  print(f"ERREUR [{label}]: signature de fonction introuvable dans {filepath}")
+                  return
+              content = content[:idx] + extern_decl + content[idx:]
+              idx2 = content.find(func_anchor)
+              func_end = content.find('\n}', idx2) + 2
+              func_body = content[idx2:func_end]
+              if body_anchor not in func_body:
+                  print(f"ERREUR [{label}]: ligne d'ancrage introuvable dans le corps ({filepath})")
+                  return
+              func_body_new = func_body.replace(body_anchor, hook_call + '\n\t' + body_anchor, 1)
+              content = content[:idx2] + func_body_new + content[func_end:]
+              with open(filepath, 'w') as f:
+                  f.write(content)
+              print(f"[{label}] patché avec succès")
 
-          anchor = 'int do_execve(struct filename *filename,'
-          idx = content.find(anchor)
-          if idx == -1:
-              raise SystemExit("ERREUR: signature do_execve introuvable, patch non appliqué")
-
-          extern_decl = (
-              '#ifdef CONFIG_KSU\n'
-              'extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, '
-              'void *argv, void *envp, int *flags);\n'
-              '#endif\n'
+          # execveat (fs/exec.c) - déjà confirmé bon, reconduit tel quel
+          insert_hook(
+              'fs/exec.c',
+              '#ifdef CONFIG_KSU\nextern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\n#endif\n',
+              'int do_execve(struct filename *filename,',
+              'return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);',
+              '#ifdef CONFIG_KSU\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif',
+              'execveat'
           )
-          content = content[:idx] + extern_decl + content[idx:]
 
-          idx2 = content.find(anchor)
-          func_end = content.find('\n}', idx2) + 2
-          func_body = content[idx2:func_end]
-          old_call = 'return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);'
-          hook_call = (
-              '#ifdef CONFIG_KSU\n'
-              '\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n'
-              '#endif\n'
-              '\t' + old_call
+          # faccessat (fs/open.c)
+          insert_hook(
+              'fs/open.c',
+              '#ifdef CONFIG_KSU\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif\n',
+              'long do_faccessat(int dfd, const char __user *filename, int mode)',
+              'unsigned int lookup_flags = LOOKUP_FOLLOW;',
+              '#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif',
+              'faccessat'
           )
-          if old_call not in func_body:
-              raise SystemExit("ERREUR: ligne return introuvable dans do_execve, patch non appliqué")
-          func_body_new = func_body.replace(old_call, hook_call, 1)
-          content = content[:idx2] + func_body_new + content[func_end:]
 
-          with open('fs/exec.c', 'w') as f:
-              f.write(content)
-          print("Patch ksu_handle_execveat appliqué avec succès")
+          # vfs_read (fs/read_write.c)
+          insert_hook(
+              'fs/read_write.c',
+              '#ifdef CONFIG_KSU\nextern bool ksu_vfs_read_hook __read_mostly;\nextern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr, size_t *count_ptr, loff_t **pos);\n#endif\n',
+              'ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)',
+              'if (!(file->f_mode & FMODE_READ))',
+              '#ifdef CONFIG_KSU\n\tif (unlikely(ksu_vfs_read_hook))\n\t\tksu_handle_vfs_read(&file, &buf, &count, &pos);\n#endif',
+              'vfs_read'
+          )
+
+          # vfs_fstatat (fs/stat.c) - variante utilisée quand vfs_statx n'existe pas (cas probable en 4.19)
+          insert_hook(
+              'fs/stat.c',
+              '#ifdef CONFIG_KSU\nextern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);\n#endif\n',
+              'int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat, int flag)',
+              'if ((flag & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT | AT_EMPTY_PATH)) != 0)',
+              '#ifdef CONFIG_KSU\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif',
+              'vfs_fstatat'
+          )
           PYEOF
-          echo "--- Vérification ---"
-          grep -n "ksu_handle_execveat" fs/exec.c | tee exec_patch_verify.log
+          echo "--- Vérification des 4 hooks ---" | tee hooks_verify.log
+          grep -rn "ksu_handle_execveat\|ksu_handle_faccessat\|ksu_handle_vfs_read\|ksu_handle_stat" fs/exec.c fs/open.c fs/read_write.c fs/stat.c | tee -a hooks_verify.log
 
       - name: Activer les flags requis
         working-directory: kernel/source
